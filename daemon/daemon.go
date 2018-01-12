@@ -42,8 +42,7 @@ type Daemon struct {
 	Manifests      cluster.Manifests
 	Registry       registry.Registry
 	ImageRefresh   chan image.Name
-	Repo           git.Repo
-	Checkout       *git.Checkout
+	Repo           *git.Repo
 	Jobs           *job.Queue
 	JobStatusCache *job.StatusCache
 	EventWriter    event.EventWriter
@@ -73,10 +72,17 @@ func (d *Daemon) ListServices(ctx context.Context, namespace string) ([]flux.Con
 		return nil, errors.Wrap(err, "getting services from cluster")
 	}
 
-	d.Checkout.RLock()
-	defer d.Checkout.RUnlock()
+	// FIXME(michael): consider a more efficient read-only way to do this
+	checkout, err := d.Repo.Clone(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer checkout.Clean()
 
-	services, err := d.Manifests.ServicesWithPolicies(d.Checkout.ManifestDir())
+	checkout.RLock()
+	defer checkout.RUnlock()
+
+	services, err := d.Manifests.ServicesWithPolicies(checkout.ManifestDir())
 	if err != nil {
 		return nil, errors.Wrap(err, "getting service policies")
 	}
@@ -141,12 +147,13 @@ func (d *Daemon) executeJob(id job.ID, do DaemonJobFunc, logger log.Logger) (*ev
 	d.JobStatusCache.SetStatus(id, job.Status{StatusString: job.StatusRunning})
 	// make a working clone so we don't mess with files we
 	// will be reading from elsewhere
-	working, err := d.Checkout.WorkingClone(ctx)
+	working, err := d.Repo.Clone(ctx)
 	if err != nil {
 		d.JobStatusCache.SetStatus(id, job.Status{StatusString: job.StatusFailed, Err: err.Error()})
 		return nil, err
 	}
 	defer working.Clean()
+
 	metadata, err := do(ctx, id, working, logger)
 	if err != nil {
 		d.JobStatusCache.SetStatus(id, job.Status{StatusString: job.StatusFailed, Err: err.Error()})
@@ -272,7 +279,7 @@ func (d *Daemon) updatePolicy(spec update.Spec, updates policy.Updates) DaemonJo
 		}
 
 		commitAuthor := ""
-		if d.Checkout.Config.SetAuthor {
+		if d.Repo.Config().SetAuthor {
 			commitAuthor = spec.Cause.User
 		}
 		commitAction := &git.CommitAction{Author: commitAuthor, Message: policyCommitMessage(updates, spec.Cause)}
@@ -280,7 +287,7 @@ func (d *Daemon) updatePolicy(spec update.Spec, updates policy.Updates) DaemonJo
 			// On the chance pushing failed because it was not
 			// possible to fast-forward, ask for a sync so the
 			// next attempt is more likely to succeed.
-			d.AskForSync()
+			d.Repo.Notify()
 			return nil, err
 		}
 		if anythingAutomated {
@@ -311,7 +318,7 @@ func (d *Daemon) release(spec update.Spec, c release.Changes) DaemonJobFunc {
 				commitMsg = c.CommitMessage()
 			}
 			commitAuthor := ""
-			if d.Checkout.Config.SetAuthor {
+			if d.Repo.Config().SetAuthor {
 				commitAuthor = spec.Cause.User
 			}
 			commitAction := &git.CommitAction{Author: commitAuthor, Message: commitMsg}
@@ -366,18 +373,25 @@ func (d *Daemon) JobStatus(ctx context.Context, jobID job.ID) (job.Status, error
 	// Look through the commits for a note referencing this job.  This
 	// means that even if fluxd restarts, we will at least remember
 	// jobs which have pushed a commit.
-	notes, err := d.Checkout.NoteRevList(ctx)
+	// FIXME(michael): consider looking at the repo for this
+	working, err := d.Repo.Clone(ctx)
+	if err != nil {
+		return job.Status{}, err
+	}
+	defer working.Clean()
+
+	notes, err := working.NoteRevList(ctx)
 	if err != nil {
 		return job.Status{}, errors.Wrap(err, "enumerating commit notes")
 	}
-	commits, err := d.Checkout.CommitsBefore(ctx, "HEAD")
+	commits, err := working.CommitsBefore(ctx, "HEAD")
 	if err != nil {
 		return job.Status{}, errors.Wrap(err, "checking revisions for status")
 	}
 
 	for _, commit := range commits {
 		if _, ok := notes[commit.Revision]; ok {
-			note, _ := d.Checkout.GetNote(ctx, commit.Revision)
+			note, _ := working.GetNote(ctx, commit.Revision)
 			if note != nil && note.JobID == jobID {
 				return job.Status{
 					StatusString: job.StatusSucceeded,
@@ -394,13 +408,21 @@ func (d *Daemon) JobStatus(ctx context.Context, jobID job.ID) (job.Status, error
 	return job.Status{}, unknownJobError(jobID)
 }
 
-// Ask the daemon how far it's got applying things; in particular, is it
-// past the supplied release? Return the list of commits between where
-// we have applied and the ref given, inclusive. E.g., if you send HEAD,
-// you'll get all the commits yet to be applied. If you send a hash
-// and it's applied _past_ it, you'll get an empty list.
+// Ask the daemon how far it's got applying things; in particular, is
+// it past the given commit? Return the list of commits between where
+// we have applied (the sync tag) and the ref given, inclusive. E.g.,
+// if you send HEAD, you'll get all the commits yet to be applied. If
+// you send a hash and it's applied at or _past_ it, you'll get an
+// empty list.
 func (d *Daemon) SyncStatus(ctx context.Context, commitRef string) ([]string, error) {
-	commits, err := d.Checkout.CommitsBetween(ctx, d.Checkout.SyncTag, commitRef)
+	// FIXME(michael): consider using Repo for this
+	working, err := d.Repo.Clone(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer working.Clean()
+
+	commits, err := working.CommitsBetween(ctx, d.Repo.Config().SyncTag, commitRef)
 	if err != nil {
 		return nil, err
 	}
@@ -410,6 +432,8 @@ func (d *Daemon) SyncStatus(ctx context.Context, commitRef string) ([]string, er
 	for i, commit := range commits {
 		revs[i] = commit.Revision
 	}
+	// FIXME(michael) debug, remove this
+	fmt.Printf("SyncStatus: %s..%s -> %d revisions\n", d.Repo.Config().SyncTag, commitRef, len(revs))
 	return revs, nil
 }
 
@@ -418,8 +442,14 @@ func (d *Daemon) GitRepoConfig(ctx context.Context, regenerate bool) (flux.GitCo
 	if err != nil {
 		return flux.GitConfig{}, err
 	}
+
+	origin := d.Repo.Origin()
 	return flux.GitConfig{
-		Remote:       d.Repo.GitRemoteConfig,
+		Remote: flux.GitRemoteConfig{
+			URL:    origin.URL,
+			Branch: d.Repo.Config().Branch,
+			Path:   d.Repo.Config().Path,
+		},
 		PublicSSHKey: publicSSHKey,
 		Status:       flux.RepoReady,
 	}, nil

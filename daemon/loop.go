@@ -27,7 +27,7 @@ const (
 )
 
 type LoopVars struct {
-	GitPollInterval      time.Duration
+	SyncInterval         time.Duration
 	RegistryPollInterval time.Duration
 	syncSoon             chan struct{}
 	pollImagesSoon       chan struct{}
@@ -41,28 +41,12 @@ func (loop *LoopVars) ensureInit() {
 	})
 }
 
-func (d *Daemon) GitPollLoop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger) {
+func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger) {
 	defer wg.Done()
-	// We want to pull the repo and sync at least every
-	// `GitPollInterval`. Being told to sync, or completing a job, may
-	// intervene (in which case, reschedule the next pull-and-sync)
-	gitPollTimer := time.NewTimer(d.GitPollInterval)
-	pullThen := func(k func(logger log.Logger) error) {
-		defer func() {
-			gitPollTimer.Stop()
-			gitPollTimer = time.NewTimer(d.GitPollInterval)
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
-		defer cancel()
-		if err := d.Checkout.Pull(ctx); err != nil {
-			logger.Log("operation", "pull", "err", err)
-			return
-		}
-		if err := k(logger); err != nil {
-			logger.Log("operation", "after-pull", "err", err)
-		}
-	}
-
+	// We want to sync at least every `SyncInterval`. Being told to
+	// sync, or completing a job, may intervene (in which case,
+	// reschedule the next sync)
+	syncTimer := time.NewTimer(d.SyncInterval)
 	imagePollTimer := time.NewTimer(d.RegistryPollInterval)
 
 	// Ask for a sync, and to poll images, straight away
@@ -75,16 +59,16 @@ func (d *Daemon) GitPollLoop(stop chan struct{}, wg *sync.WaitGroup, logger log.
 			return
 		case <-d.pollImagesSoon:
 			d.pollForNewImages(logger)
-			imagePollTimer.Stop()
-			imagePollTimer = time.NewTimer(d.RegistryPollInterval)
 		case <-imagePollTimer.C:
 			d.AskForImagePoll()
+			imagePollTimer = time.NewTimer(d.RegistryPollInterval)
 		case <-d.syncSoon:
-			pullThen(d.doSync)
-		case <-gitPollTimer.C:
+			d.doSync(logger)
+		case <-syncTimer.C:
 			// Time to poll for new commits (unless we're already
 			// about to do that)
 			d.AskForSync()
+			syncTimer = time.NewTimer(d.SyncInterval)
 		case job := <-d.Jobs.Ready():
 			queueLength.Set(float64(d.Jobs.Len()))
 			jobLogger := log.With(logger, "jobID", job.ID)
@@ -102,7 +86,9 @@ func (d *Daemon) GitPollLoop(stop chan struct{}, wg *sync.WaitGroup, logger log.
 			jobDuration.With(
 				fluxmetrics.LabelSuccess, fmt.Sprint(err == nil),
 			).Observe(time.Since(start).Seconds())
-			pullThen(d.doSync)
+			// FIXME(michael): this tells the repo to pull from
+			// upstream; what tells us sync when that's done?
+			d.Repo.Notify()
 		}
 	}
 }
@@ -145,7 +131,7 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 		var err error
 		ctx, cancel := context.WithTimeout(ctx, gitOpTimeout)
 		defer cancel()
-		working, err = d.Checkout.WorkingClone(ctx)
+		working, err = d.Repo.Clone(ctx)
 		if err != nil {
 			return err
 		}
@@ -350,37 +336,33 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 		}
 	}
 
-	// Pull the tag if it has changed
-	{
-		ctx, cancel := context.WithTimeout(ctx, gitOpTimeout)
-		if err := d.pullIfTagMoved(ctx, working, logger); err != nil {
-			logger.Log("err", errors.Wrap(err, "updating tag"))
-		}
-		cancel()
-	}
+	// We'll want to pull the tag from upstream
+	// FIXME(michael) does this need to be synchronous?
+	d.Repo.Notify()
 
 	return nil
 }
 
-func (d *Daemon) pullIfTagMoved(ctx context.Context, working *git.Checkout, logger log.Logger) error {
-	oldTagRev, err := d.Checkout.TagRevision(ctx, d.Checkout.SyncTag)
-	if err != nil && !strings.Contains(err.Error(), "unknown revision or path not in the working tree") {
-		return err
-	}
-	newTagRev, err := working.TagRevision(ctx, working.SyncTag)
-	if err != nil {
-		return err
-	}
+// func (d *Daemon) pullIfTagMoved(ctx context.Context, working *git.Checkout, logger log.Logger) error {
+//     //
+// 	oldTagRev, err := d.Checkout.TagRevision(ctx, d.Checkout.SyncTag)
+// 	if err != nil && !strings.Contains(err.Error(), "unknown revision or path not in the working tree") {
+// 		return err
+// 	}
+// 	newTagRev, err := working.TagRevision(ctx, working.SyncTag)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	if oldTagRev != newTagRev {
-		logger.Log("tag", d.Checkout.SyncTag, "old", oldTagRev, "new", newTagRev)
-		if err := d.Checkout.Pull(ctx); err != nil {
-			return err
-		}
-	}
+// 	if oldTagRev != newTagRev {
+// 		logger.Log("tag", d.Checkout.SyncTag, "old", oldTagRev, "new", newTagRev)
+// 		if err := d.Checkout.Pull(ctx); err != nil {
+// 			return err
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 func isUnknownRevision(err error) bool {
 	return err != nil &&

@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/weaveworks/flux"
+	"github.com/weaveworks/flux/git"
 	"github.com/weaveworks/flux/image"
 	"github.com/weaveworks/flux/policy"
 	"github.com/weaveworks/flux/update"
@@ -18,8 +19,15 @@ func (d *Daemon) pollForNewImages(logger log.Logger) {
 
 	// One day we may use this for operations other than the call at the end
 	ctx := context.Background()
+	// FIXME(michael): consider using Repo for this
+	working, err := d.Repo.Clone(ctx)
+	if err != nil {
+		logger.Log("err", err)
+		return
+	}
+	defer working.Clean()
 
-	candidateServices, err := d.unlockedAutomatedServices()
+	candidateServices, err := d.unlockedAutomatedServices(working)
 	if err != nil {
 		logger.Log("error", errors.Wrap(err, "getting unlocked automated services"))
 		return
@@ -77,8 +85,9 @@ func getTagPattern(services policy.ResourceMap, service flux.ResourceID, contain
 	return "*"
 }
 
-func (d *Daemon) unlockedAutomatedServices() (policy.ResourceMap, error) {
-	services, err := d.Manifests.ServicesWithPolicies(d.Checkout.ManifestDir())
+// FIXME(michael) consider rewriting this stuff, it's a bit convulated.
+func (d *Daemon) unlockedAutomatedServices(checkout *git.Checkout) (policy.ResourceMap, error) {
+	services, err := d.Manifests.ServicesWithPolicies(checkout.ManifestDir())
 	if err != nil {
 		return nil, err
 	}
