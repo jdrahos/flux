@@ -28,7 +28,7 @@ func config(ctx context.Context, workingDir, user, email string) error {
 	return nil
 }
 
-func clone(ctx context.Context, workingDir string, repoURL, repoBranch string) (path string, err error) {
+func clone(ctx context.Context, workingDir, repoURL, repoBranch string) (path string, err error) {
 	repoPath := filepath.Join(workingDir, "repo")
 	args := []string{"clone"}
 	if repoBranch != "" {
@@ -37,6 +37,16 @@ func clone(ctx context.Context, workingDir string, repoURL, repoBranch string) (
 	args = append(args, repoURL, repoPath)
 	if err := execGitCmd(ctx, workingDir, nil, args...); err != nil {
 		return "", errors.Wrap(err, "git clone")
+	}
+	return repoPath, nil
+}
+
+func mirror(ctx context.Context, workingDir, repoURL string) (path string, err error) {
+	repoPath := filepath.Join(workingDir, "repo")
+	args := []string{"clone", "--mirror"}
+	args = append(args, repoURL, repoPath)
+	if err := execGitCmd(ctx, workingDir, nil, args...); err != nil {
+		return "", errors.Wrap(err, "git clone --mirror")
 	}
 	return repoPath, nil
 }

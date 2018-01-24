@@ -87,7 +87,7 @@ func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger)
 				fluxmetrics.LabelSuccess, fmt.Sprint(err == nil),
 			).Observe(time.Since(start).Seconds())
 			// FIXME(michael): this tells the repo to pull from
-			// upstream; what tells us sync when that's done?
+			// upstream; what tells us to sync when that's done?
 			d.Repo.Notify()
 		}
 	}
@@ -137,8 +137,12 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 		}
 		defer working.Clean()
 	}
+	// For comparison later
+	oldTagRev, err := working.TagRevision(ctx, working.Config.SyncTag)
+	if err != nil && !isUnknownRevision(err) {
+		return err
+	}
 
-	// TODO logging, metrics?
 	// Get a map of all resources defined in the repo
 	allResources, err := d.Manifests.LoadManifests(working.ManifestDir())
 	if err != nil {
@@ -336,33 +340,19 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 		}
 	}
 
-	// We'll want to pull the tag from upstream
-	// FIXME(michael) does this need to be synchronous?
-	d.Repo.Notify()
+	newTagRev, err := working.TagRevision(ctx, working.SyncTag)
+	if err != nil {
+		return err
+	}
+	if oldTagRev != newTagRev {
+		logger.Log("tag", working.SyncTag, "old", oldTagRev, "new", newTagRev)
+		if err := d.Repo.Sync(ctx); err != nil {
+			logger.Log("sync-err", err)
+		}
+	}
 
 	return nil
 }
-
-// func (d *Daemon) pullIfTagMoved(ctx context.Context, working *git.Checkout, logger log.Logger) error {
-//     //
-// 	oldTagRev, err := d.Checkout.TagRevision(ctx, d.Checkout.SyncTag)
-// 	if err != nil && !strings.Contains(err.Error(), "unknown revision or path not in the working tree") {
-// 		return err
-// 	}
-// 	newTagRev, err := working.TagRevision(ctx, working.SyncTag)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	if oldTagRev != newTagRev {
-// 		logger.Log("tag", d.Checkout.SyncTag, "old", oldTagRev, "new", newTagRev)
-// 		if err := d.Checkout.Pull(ctx); err != nil {
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-// }
 
 func isUnknownRevision(err error) bool {
 	return err != nil &&
