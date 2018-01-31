@@ -88,7 +88,7 @@ func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger)
 			).Observe(time.Since(start).Seconds())
 			// Make sure we've updated the repo, to get any changes we
 			// just pushed, before continuing.
-			d.Repo.Sync(context.Background())
+			d.doSync(logger)
 		}
 	}
 }
@@ -124,6 +124,13 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 	// getting bogged down in certain operations, so use an
 	// undeadlined context in general.
 	ctx := context.Background()
+
+	{
+		ctx, _ := context.WithTimeout(ctx, gitOpTimeout)
+		if err := d.Repo.Sync(ctx); err != nil {
+			return err
+		}
+	}
 
 	// checkout a working clone so we can mess around with tags later
 	var working *git.Checkout
