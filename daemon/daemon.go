@@ -287,7 +287,7 @@ func (d *Daemon) updatePolicy(spec update.Spec, updates policy.Updates) DaemonJo
 			// On the chance pushing failed because it was not
 			// possible to fast-forward, ask for a sync so the
 			// next attempt is more likely to succeed.
-			d.Repo.Notify()
+			d.AskForSync()
 			return nil, err
 		}
 		if anythingAutomated {

@@ -44,17 +44,20 @@ type Config struct {
 }
 
 type Repo struct {
-	// Supplied to constructor
+	// As supplied to constructor
 	origin Remote
 	config Config
 
-	// Bookkeeping
-	status  flux.GitRepoStatus
-	err     error
+	// State
+	mu     sync.RWMutex
+	status flux.GitRepoStatus
+	err    error
+	dir    string
+
+	// Channels for requesting a git pull; either syncrhonously
+	// (`request`) or asynchronously (`notify`).
 	notify  chan struct{}
 	request chan request
-	dir     string
-	mu      sync.RWMutex
 }
 
 type request struct {
@@ -95,13 +98,6 @@ func (r *Repo) Dir() string {
 	return r.dir
 }
 
-func (r *Repo) setStatus(s flux.GitRepoStatus, err error) {
-	r.mu.Lock()
-	r.status = s
-	r.err = err
-	r.mu.Unlock()
-}
-
 // Status reports that readiness status of this Git repo: whether it
 // has been cloned, whether it is writable, and if not, the error
 // stopping it getting to the next state.
@@ -109,6 +105,13 @@ func (r *Repo) Status() (flux.GitRepoStatus, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.status, r.err
+}
+
+func (r *Repo) setStatus(s flux.GitRepoStatus, err error) {
+	r.mu.Lock()
+	r.status = s
+	r.err = err
+	r.mu.Unlock()
 }
 
 // Notify tells the repo that it should fetch from the origin as soon
@@ -125,27 +128,22 @@ func (r *Repo) Notify() {
 // Sync asks for the repo to be synced, and blocks until it has
 // succeeded or failed.
 func (r *Repo) Sync(ctx context.Context) error {
-	r.mu.RLock()
-	s := r.status
-	r.mu.RUnlock()
-	// FIXME(maybe): race here, the repo may revert to a non-ready
-	// state, here, and never be restored to a ready state.
-	switch s {
-	case flux.RepoReady:
-		req := request{reply: make(chan error), ctx: ctx}
-		select {
-		case r.request <- req:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		select {
-		case err := <-req.reply:
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	default:
-		return ErrNotReady
+	// The reply channel is a cell, so that we don't inadvertently
+	// block the sender when we stop trying to receive.
+	req := request{reply: make(chan error, 1), ctx: ctx}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case r.request <- req:
+		// proceed
+	}
+
+	select {
+	case err := <-req.reply:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -179,6 +177,7 @@ func (r *Repo) Start(shutdown <-chan struct{}, done *sync.WaitGroup) error {
 	defer done.Done()
 
 	for {
+
 		r.mu.RLock()
 		url := r.origin.URL
 		dir := r.dir
@@ -186,10 +185,13 @@ func (r *Repo) Start(shutdown <-chan struct{}, done *sync.WaitGroup) error {
 		r.mu.RUnlock()
 
 		switch status {
+
 		case flux.RepoNoConfig:
-			// this is not going to change in the lifetime of this process
+			// this is not going to change in the lifetime of this
+			// process
 			return ErrNoConfig
 		case flux.RepoNew:
+
 			ctx := context.Background()
 			rootdir, err := ioutil.TempDir(os.TempDir(), "flux-gitclone")
 			if err != nil {
@@ -209,20 +211,18 @@ func (r *Repo) Start(shutdown <-chan struct{}, done *sync.WaitGroup) error {
 			if err == nil {
 				r.setStatus(flux.RepoCloned, nil)
 				continue // with new status, skipping timer
-			} else {
-				dir = ""
-				os.RemoveAll(rootdir)
-				r.setStatus(flux.RepoNew, err)
 			}
+			dir = ""
+			os.RemoveAll(rootdir)
+			r.setStatus(flux.RepoNew, err)
 
 		case flux.RepoCloned:
 			err := checkPush(context.Background(), dir, url)
 			if err == nil {
 				r.setStatus(flux.RepoReady, nil)
 				continue // with new status, skipping timer
-			} else {
-				r.setStatus(flux.RepoCloned, err)
 			}
+			r.setStatus(flux.RepoCloned, err)
 
 		case flux.RepoReady:
 			if err := r.refreshLoop(shutdown); err != nil {

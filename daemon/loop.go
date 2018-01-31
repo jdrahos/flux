@@ -86,9 +86,9 @@ func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger)
 			jobDuration.With(
 				fluxmetrics.LabelSuccess, fmt.Sprint(err == nil),
 			).Observe(time.Since(start).Seconds())
-			// FIXME(michael): this tells the repo to pull from
-			// upstream; what tells us to sync when that's done?
-			d.Repo.Notify()
+			// Make sure we've updated the repo, to get any changes we
+			// just pushed, before continuing.
+			d.Repo.Sync(context.Background())
 		}
 	}
 }
@@ -346,6 +346,7 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 	}
 	if oldTagRev != newTagRev {
 		logger.Log("tag", working.SyncTag, "old", oldTagRev, "new", newTagRev)
+		// Pull the new tag position before continuing
 		if err := d.Repo.Sync(ctx); err != nil {
 			logger.Log("sync-err", err)
 		}
