@@ -29,9 +29,10 @@ const (
 type LoopVars struct {
 	SyncInterval         time.Duration
 	RegistryPollInterval time.Duration
-	syncSoon             chan struct{}
-	pollImagesSoon       chan struct{}
-	initOnce             sync.Once
+
+	initOnce       sync.Once
+	syncSoon       chan struct{}
+	pollImagesSoon chan struct{}
 }
 
 func (loop *LoopVars) ensureInit() {
@@ -49,6 +50,15 @@ func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger)
 	syncTimer := time.NewTimer(d.SyncInterval)
 	imagePollTimer := time.NewTimer(d.RegistryPollInterval)
 
+	// FIXME(michael) possibly move this hookup to daemon.go or main.go
+	d.Repo.Handler(d.AskForSync)
+
+	jobs := d.Jobs.Ready()
+	// TODO(michael) In some places we don't want to run another job
+	// until we've pulled from the upstream repo again. We can swap
+	// these around depending on which state we're in.
+	// jobsStop := make(chan *job.Job)
+
 	// Ask for a sync, and to poll images, straight away
 	d.AskForSync()
 	d.AskForImagePoll()
@@ -61,15 +71,13 @@ func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger)
 			d.pollForNewImages(logger)
 		case <-imagePollTimer.C:
 			d.AskForImagePoll()
-			imagePollTimer = time.NewTimer(d.RegistryPollInterval)
+			imagePollTimer.Reset(d.RegistryPollInterval)
 		case <-d.syncSoon:
 			d.doSync(logger)
 		case <-syncTimer.C:
-			// Time to poll for new commits (unless we're already
-			// about to do that)
 			d.AskForSync()
-			syncTimer = time.NewTimer(d.SyncInterval)
-		case job := <-d.Jobs.Ready():
+			syncTimer.Reset(d.SyncInterval)
+		case job := <-jobs:
 			queueLength.Set(float64(d.Jobs.Len()))
 			jobLogger := log.With(logger, "jobID", job.ID)
 			jobLogger.Log("state", "in-progress")
@@ -86,9 +94,6 @@ func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger)
 			jobDuration.With(
 				fluxmetrics.LabelSuccess, fmt.Sprint(err == nil),
 			).Observe(time.Since(start).Seconds())
-			// Make sure we've updated the repo, to get any changes we
-			// just pushed, before continuing.
-			d.doSync(logger)
 		}
 	}
 }
@@ -125,13 +130,6 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 	// undeadlined context in general.
 	ctx := context.Background()
 
-	{
-		ctx, _ := context.WithTimeout(ctx, gitOpTimeout)
-		if err := d.Repo.Sync(ctx); err != nil {
-			return err
-		}
-	}
-
 	// checkout a working clone so we can mess around with tags later
 	var working *git.Checkout
 	{
@@ -144,7 +142,8 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 		}
 		defer working.Clean()
 	}
-	// For comparison later
+
+	// For comparison later.
 	oldTagRev, err := working.TagRevision(ctx, working.Config.SyncTag)
 	if err != nil && !isUnknownRevision(err) {
 		return err
@@ -353,10 +352,6 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 	}
 	if oldTagRev != newTagRev {
 		logger.Log("tag", working.SyncTag, "old", oldTagRev, "new", newTagRev)
-		// Pull the new tag position before continuing
-		if err := d.Repo.Sync(ctx); err != nil {
-			logger.Log("sync-err", err)
-		}
 	}
 
 	return nil

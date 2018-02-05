@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"os"
-	"path/filepath"
+	//	"path/filepath"
 	"sync"
 
 	"context"
@@ -53,26 +53,18 @@ type Repo struct {
 	status flux.GitRepoStatus
 	err    error
 	dir    string
+	handle func()
 
-	// Channels for requesting a git pull; either syncrhonously
-	// (`request`) or asynchronously (`notify`).
-	notify  chan struct{}
-	request chan request
-}
-
-type request struct {
-	reply chan error
-	ctx   context.Context
+	notify chan struct{}
 }
 
 func NewRepo(origin Remote, config Config) *Repo {
 	r := &Repo{
-		origin:  origin,
-		config:  config,
-		status:  flux.RepoNew,
-		err:     nil,
-		notify:  make(chan struct{}, 1), // `1` so that Notify doesn't block
-		request: make(chan request, 0),  // `0` so that Sync blocks
+		origin: origin,
+		config: config,
+		status: flux.RepoNew,
+		err:    nil,
+		notify: make(chan struct{}, 1), // `1` so that Notify doesn't block
 	}
 	return r
 }
@@ -125,51 +117,46 @@ func (r *Repo) Notify() {
 	}
 }
 
-// Sync asks for the repo to be synced, and blocks until it has
-// succeeded or failed.
-func (r *Repo) Sync(ctx context.Context) error {
-	// The reply channel is a cell, so that we don't inadvertently
-	// block the sender when we stop trying to receive.
-	req := request{reply: make(chan error, 1), ctx: ctx}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case r.request <- req:
-		// proceed
-	}
-
-	select {
-	case err := <-req.reply:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+// Set the handler for when we see new commits
+func (r *Repo) Handler(handle func()) {
+	r.mu.Lock()
+	r.handle = handle
+	r.mu.Unlock()
 }
 
-// Read lets the caller examine a read-only clone of the repo.
-func (r *Repo) Read(ctx context.Context, readf func(dir string) error) error {
-	r.mu.RLock()
-	s := r.status
-	r.mu.RUnlock()
-	if s != flux.RepoReady {
-		return ErrNotReady
-	}
+// // Read lets the caller examine a read-only clone of the repo.
+// func (r *Repo) Read(ctx context.Context, readf func(dir string) error) error {
+// 	r.mu.RLock()
+// 	s := r.status
+// 	r.mu.RUnlock()
+// 	if s != flux.RepoReady {
+// 		return ErrNotReady
+// 	}
 
-	dir, err := ioutil.TempDir(os.TempDir(), "flux-readclone")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
+// 	dir, err := ioutil.TempDir(os.TempDir(), "flux-readclone")
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer os.RemoveAll(dir)
 
-	r.mu.RLock()
-	path, err := clone(ctx, dir, r.dir, r.config.Branch)
-	r.mu.RUnlock()
-	if err != nil {
-		return err
-	}
-	return readf(filepath.Join(path, r.config.Path))
-}
+// 	r.mu.RLock()
+// 	path, err := clone(ctx, dir, r.dir, r.config.Branch)
+// 	r.mu.RUnlock()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return readf(filepath.Join(path, r.config.Path))
+// }
+
+// Head returns the head revision of the branch given in config.
+// func (r *Repo) Head(ctx context.Context) (string, error) {
+// 	r.mu.RLock()
+// 	defer r.mu.RUnlock()
+// 	if r.dir == "" {
+// 		return "", errors.New("git repo not initialised")
+// 	}
+// 	return refRevision(ctx, r.dir, r.Config.Branch)
+// }
 
 // Start begins synchronising the repo by cloning it, then fetching
 // the required tags and so on.
@@ -249,7 +236,25 @@ func (r *Repo) refresh(ctx context.Context) error {
 	// could clone to another repo and pull there, then swap when complete.
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.fetchRefs(ctx)
+	head, err := refRevision(ctx, r.dir, r.config.Branch)
+	if err != nil {
+		return err
+	}
+	err = r.fetchRefs(ctx)
+	if err != nil {
+		return err
+	}
+	newHead, err := refRevision(ctx, r.dir, r.config.Branch)
+	if err != nil {
+		return err
+	}
+	if newHead != head {
+		handle := r.handle
+		// FIXME(michael) We can surely do better; perhaps by handling in
+		// the loop.
+		go handle()
+	}
+	return nil
 }
 
 func (r *Repo) refreshLoop(shutdown <-chan struct{}) error {
@@ -275,10 +280,6 @@ func (r *Repo) refreshLoop(shutdown <-chan struct{}) error {
 			if err := r.refresh(ctx); err != nil {
 				return err
 			}
-		case req := <-r.request:
-			err := r.refresh(ctx)
-			req.reply <- err
-			return err
 		}
 	}
 }

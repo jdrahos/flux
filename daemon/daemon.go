@@ -324,9 +324,10 @@ func (d *Daemon) release(spec update.Spec, c release.Changes) DaemonJobFunc {
 			commitAction := &git.CommitAction{Author: commitAuthor, Message: commitMsg}
 			if err := working.CommitAndPush(ctx, commitAction, &git.Note{JobID: jobID, Spec: spec, Result: result}); err != nil {
 				// On the chance pushing failed because it was not
-				// possible to fast-forward, ask for a sync so the
-				// next attempt is more likely to succeed.
-				d.AskForSync()
+				// possible to fast-forward, ask the repo to fetch
+				// from upstream ASAP, so the next attempt is more
+				// likely to suceed.
+				d.Repo.Notify()
 				return nil, err
 			}
 			revision, err = working.HeadRevision(ctx)
@@ -350,7 +351,7 @@ func (d *Daemon) NotifyChange(ctx context.Context, change remote.Change) error {
 	switch change.Kind {
 	case remote.GitChange:
 		// TODO: check if it's actually our repo
-		d.AskForSync()
+		d.Repo.Notify()
 	case remote.ImageChange:
 		if imageUp, ok := change.Source.(remote.ImageUpdate); ok {
 			if d.ImageRefresh != nil {
