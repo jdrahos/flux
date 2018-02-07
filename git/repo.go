@@ -231,11 +231,14 @@ func (r *Repo) Start(shutdown <-chan struct{}, done *sync.WaitGroup) error {
 	}
 }
 
-func (r *Repo) refresh(ctx context.Context) error {
+func (r *Repo) Refresh(ctx context.Context) error {
 	// the lock here and below is difficult to avoid; possibly we
 	// could clone to another repo and pull there, then swap when complete.
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.status != flux.RepoReady {
+		return ErrNotReady
+	}
 	head, err := refRevision(ctx, r.dir, r.config.Branch)
 	if err != nil {
 		return err
@@ -268,16 +271,16 @@ func (r *Repo) refreshLoop(shutdown <-chan struct{}) error {
 			}
 			return nil
 		case <-gitPoll.C:
-			if err := r.refresh(ctx); err != nil {
+			if err := r.Refresh(ctx); err != nil {
 				return err
 			}
-			gitPoll = time.NewTimer(interval)
+			gitPoll.Reset(interval)
 		case <-r.notify:
 			if !gitPoll.Stop() {
 				<-gitPoll.C
 			}
-			gitPoll = time.NewTimer(interval)
-			if err := r.refresh(ctx); err != nil {
+			gitPoll.Reset(interval)
+			if err := r.Refresh(ctx); err != nil {
 				return err
 			}
 		}

@@ -86,14 +86,16 @@ func (d *Daemon) Loop(stop chan struct{}, wg *sync.WaitGroup, logger log.Logger)
 			// pull from there and sync the cluster afterwards.
 			start := time.Now()
 			err := job.Do(jobLogger)
+			jobDuration.With(
+				fluxmetrics.LabelSuccess, fmt.Sprint(err == nil),
+			).Observe(time.Since(start).Seconds())
 			if err != nil {
 				jobLogger.Log("state", "done", "success", "false", "err", err)
 			} else {
 				jobLogger.Log("state", "done", "success", "true")
+				// FIXME(michael): context.TODO()
+				d.Repo.Refresh(context.TODO())
 			}
-			jobDuration.With(
-				fluxmetrics.LabelSuccess, fmt.Sprint(err == nil),
-			).Observe(time.Since(start).Seconds())
 		}
 	}
 }
@@ -352,6 +354,10 @@ func (d *Daemon) doSync(logger log.Logger) (retErr error) {
 	}
 	if oldTagRev != newTagRev {
 		logger.Log("tag", working.SyncTag, "old", oldTagRev, "new", newTagRev)
+		ctx, cancel := context.WithTimeout(ctx, gitOpTimeout)
+		err := d.Repo.Refresh(ctx)
+		cancel()
+		return err
 	}
 
 	return nil
