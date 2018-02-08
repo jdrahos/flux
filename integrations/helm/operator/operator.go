@@ -214,7 +214,7 @@ func (c *Controller) processNextWorkItem() bool {
 			// Forget not to get into a loop of attempting to
 			// process a work item that is invalid.
 			c.releaseWorkqueue.Forget(obj)
-			runtime.HandleError(fmt.Errorf("expected string in workqueue but got %#v", obj))
+			runtime.HandleError(fmt.Errorf("Expected string in workqueue but got %#v", obj))
 
 			return nil
 		}
@@ -228,13 +228,13 @@ func (c *Controller) processNextWorkItem() bool {
 		// get queued again until another change happens.
 		c.releaseWorkqueue.Forget(obj)
 
-		c.logger.Log("info", fmt.Sprintf("\t\t *** Successfully synced '%s'", key))
+		c.logger.Log("info", fmt.Sprintf("Successfully synced '%s'", key))
 
 		return nil
 	}(obj)
 
 	if err != nil {
-		c.logger.Log("info", fmt.Sprintf("Caught runtime error: %#v", err))
+		//c.logger.Log("info", fmt.Sprintf("Caught runtime error: %#v", err))
 		runtime.HandleError(err)
 		return true
 	}
