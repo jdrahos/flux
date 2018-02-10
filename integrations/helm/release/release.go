@@ -33,13 +33,13 @@ type Release struct {
 }
 
 type repo struct {
-	charts *helmgit.Checkout
+	ChartsSync *helmgit.Checkout
 }
 
 // New creates a new Release instance
 func New(logger log.Logger, helmClient *k8shelm.Client, chartsCheckout *helmgit.Checkout) *Release {
 	repo := repo{
-		charts: chartsCheckout,
+		ChartsSync: chartsCheckout,
 	}
 	r := &Release{
 		logger:     log.With(logger, "component", "release"),
@@ -133,7 +133,7 @@ func (r *Release) canDelete(name string) (bool, error) {
 
 // Install ... performs Chart release. Depending on the release type, this is either a new release,
 // or an upgrade of an existing one
-func (r *Release) Install(releaseName string, fhr ifv1.FluxHelmResource, releaseType ReleaseType) (hapi_release.Release, error) {
+func (r *Release) Install(releaseName string, fhr ifv1.FluxHelmResource, releaseType ReleaseType, dryRun bool) (hapi_release.Release, error) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -150,13 +150,13 @@ func (r *Release) Install(releaseName string, fhr ifv1.FluxHelmResource, release
 		namespace = "default"
 	}
 
-	err := r.Repo.charts.Pull()
+	err := r.Repo.ChartsSync.Pull()
 	if err != nil {
 		r.logger.Log("error", fmt.Sprintf("Failure to do git pull: %#v", err))
 		return hapi_release.Release{}, err
 	}
 
-	chartDir := filepath.Join(r.Repo.charts.Dir, chartPath)
+	chartDir := filepath.Join(r.Repo.ChartsSync.Dir, chartPath)
 
 	rawVals, err := collectValues(fhr.Spec.Customizations)
 	if err != nil {
@@ -172,8 +172,8 @@ func (r *Release) Install(releaseName string, fhr ifv1.FluxHelmResource, release
 			namespace,
 			k8shelm.ValueOverrides(rawVals),
 			k8shelm.ReleaseName(releaseName),
+			k8shelm.InstallDryRun(dryRun),
 			/*
-				helm.InstallDryRun(i.dryRun),
 				helm.InstallReuseName(i.replace),
 				helm.InstallDisableHooks(i.disableHooks),
 				helm.InstallTimeout(i.timeout),

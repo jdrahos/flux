@@ -275,7 +275,7 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	// Chart installation of the appropriate type
-	_, err = c.release.Install(releaseName, *fhr, syncType)
+	_, err = c.release.Install(releaseName, *fhr, syncType, false)
 	if err != nil {
 		return err
 	}

@@ -24,6 +24,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
+	k8shelm "k8s.io/helm/pkg/helm"
+
 	gitssh "gopkg.in/src-d/go-git.v4/plumbing/transport/ssh"
 )
 
@@ -179,17 +181,21 @@ func main() {
 	}
 
 	// HELM ---------------------------------------------------------------------------------
-	helmClient, err := fluxhelm.NewClient(kubeClient, fluxhelm.TillerOptions{IP: *tillerIP, Port: *tillerPort, Namespace: *tillerNamespace})
-	if err != nil {
-		mainLogger.Log("error", fmt.Sprintf("Error creating helm client: %v", err))
-		errc <- fmt.Errorf("Error creating helm client: %v", err)
+	var helmClient *k8shelm.Client
+	for {
+		helmClient, err = fluxhelm.NewClient(kubeClient, fluxhelm.TillerOptions{IP: *tillerIP, Port: *tillerPort, Namespace: *tillerNamespace})
+		if err != nil {
+			mainLogger.Log("error", fmt.Sprintf("Error creating helm client: %v", err))
+			time.Sleep(20 * time.Second)
+			continue
+		}
+		mainLogger.Log("info", "Set up Helm client")
+		break
 	}
-	mainLogger.Log("info", "Set up helmClient")
-
 	//---------------------------------------------------------------------------------------
 
 	// GIT REPO CLONING ---------------------------------------------------------------------
-	mainLogger.Log("info", "\t*** Starting to clone repos")
+	mainLogger.Log("info", "Starting to clone repo ...")
 
 	var gitAuth *gitssh.PublicKeys
 	for {
@@ -221,14 +227,17 @@ func main() {
 		mainLogger.Log("error", fmt.Sprintf("Failed to clone git repo [%s, %s, %s]: %v", gitRemoteConfigCh.URL, gitRemoteConfigCh.Branch, gitRemoteConfigCh.Path, err))
 		time.Sleep(10 * time.Second)
 	}
-	mainLogger.Log("info", "*** Cloned repos")
+	mainLogger.Log("info", "Repo cloned")
 
 	// OPERATOR -----------------------------------------------------------------------------
+	// 		CUSTOM RESOURCES CACHING SETUP -------------------------------------------------------
+	//				SharedInformerFactory sets up informer, that maps resource type to a cache shared informer.
+	//				operator attaches event handler to the informer and syncs the informer cache
 	ifInformerFactory := ifinformers.NewSharedInformerFactory(ifClient, 30*time.Second)
 	rel := release.New(log.With(logger, "component", "release"), helmClient, checkoutCh)
 	opr := operator.New(log.With(logger, "component", "operator"), kubeClient, ifClient, ifInformerFactory, rel)
 
-	// CUSTOM RESOURCES CACHING SETUP -------------------------------------------------------
+	// Starts handling k8s events related to the given resource kind
 	go ifInformerFactory.Start(shutdown)
 
 	if err = opr.Run(*queueWorkerCount, shutdown); err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/go-kit/kit/log"
+	"github.com/weaveworks/flux/integrations/helm/release"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -46,6 +47,15 @@ func GetTillerVersion(cl k8shelm.Client, h string) (string, error) {
 	fmt.Printf("Tiller version is: [%#v]\n", v.GetVersion())
 
 	return v.GetVersion().String(), nil
+}
+
+func Run(rl *release.Release, alertCh chan struct{}, helmClCh *k8shelm.Client) {
+	for {
+		select {
+		case <-alertCh:
+		default:
+		}
+	}
 }
 
 // TODO ... set up based on the tiller existing in the cluster, if no ops given
