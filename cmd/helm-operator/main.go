@@ -97,6 +97,7 @@ func init() {
 	customKubectl = fs.String("kubernetes-kubectl", "", "Optional, explicit path to kubectl tool")
 	gitURL = fs.String("git-url", "", "URL of git repo with Kubernetes manifests; e.g., git@github.com:weaveworks/flux-example")
 	gitBranch = fs.String("git-branch", "master", "branch of git repo to use for Kubernetes manifests")
+	gitConfigPath = fs.String("git-config-path", defaultGitConfigPath, "path within git repo to locate Custom Resource Kubernetes manifests (relative path)")
 	gitChartsPath = fs.String("git-charts-path", defaultGitChartsPath, "path within git repo to locate Helm Charts (relative path)")
 
 	// k8s-secret backed ssh keyring configuration
@@ -151,6 +152,13 @@ func main() {
 
 	// GIT REPO CONFIG ----------------------------------------------------------------------
 	mainLogger.Log("info", "\t*** Setting up git repo configs")
+
+	gitRemoteConfigFhr, err := git.NewGitRemoteConfig(*gitURL, *gitBranch, *gitConfigPath)
+	if err != nil {
+		mainLogger.Log("err", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%#v", gitRemoteConfigFhr)
 	gitRemoteConfigCh, err := git.NewGitRemoteConfig(*gitURL, *gitBranch, *gitChartsPath)
 	if err != nil {
 		mainLogger.Log("err", err)
@@ -211,6 +219,24 @@ func main() {
 		}
 	}
 
+	// 		Chart releases sync due to Custom Resources changes -------------------------------
+	checkoutFhr := git.NewCheckout(log.With(logger, "component", "git"), gitRemoteConfigFhr, gitAuth)
+	defer checkoutFhr.Cleanup()
+
+	// If cloning not immediately possible, we wait until it is -----------------------------
+	for {
+		mainLogger.Log("info", "Cloning repo ...")
+		ctx, cancel := context.WithTimeout(context.Background(), git.DefaultCloneTimeout)
+		err = checkoutFhr.Clone(ctx, git.FhrsChangesClone)
+		cancel()
+		if err == nil {
+			break
+		}
+		mainLogger.Log("error", fmt.Sprintf("Failed to clone git repo [%s, %s, %s]: %v", gitRemoteConfigFhr.URL, gitRemoteConfigFhr.Path, gitRemoteConfigFhr.Branch, err))
+		time.Sleep(10 * time.Second)
+	}
+	mainLogger.Log("info", "Repo cloned")
+
 	// 		Chart releases sync due to pure Charts changes ------------------------------------
 	checkoutCh := git.NewCheckout(log.With(logger, "component", "git"), gitRemoteConfigCh, gitAuth)
 	defer checkoutCh.Cleanup()
@@ -234,7 +260,7 @@ func main() {
 	//				SharedInformerFactory sets up informer, that maps resource type to a cache shared informer.
 	//				operator attaches event handler to the informer and syncs the informer cache
 	ifInformerFactory := ifinformers.NewSharedInformerFactory(ifClient, 30*time.Second)
-	rel := release.New(log.With(logger, "component", "release"), helmClient, checkoutCh)
+	rel := release.New(log.With(logger, "component", "release"), helmClient, checkoutFhr, checkoutCh)
 	opr := operator.New(log.With(logger, "component", "operator"), kubeClient, ifClient, ifInformerFactory, rel)
 
 	// Starts handling k8s events related to the given resource kind

@@ -19,6 +19,7 @@ import (
 
 const (
 	DefaultCloneTimeout = 2 * time.Minute
+	DefaultPullTimeout  = 2 * time.Minute
 	privateKeyFileMode  = os.FileMode(0400)
 	FhrsChangesClone    = "fhrs_sync_gitclone"
 	ChartsChangesClone  = "charts_sync_gitclone"
@@ -125,6 +126,8 @@ func (ch *Checkout) Clone(ctx context.Context, cloneSubdir string) error {
 	ch.Repo = repo
 	ch.worktree = wt
 
+	ch.Logger.Log("debug", fmt.Sprintf("repo cloned in into %s", ch.Dir))
+
 	return nil
 }
 
@@ -174,7 +177,7 @@ func GetRepoAuth(k8sSecretVolumeMountPath, k8sSecretDataKey string) (*gitssh.Pub
 }
 
 // Pull ... makes a git pull
-func (ch *Checkout) Pull() error {
+func (ch *Checkout) Pull(ctx context.Context) error {
 	ch.Lock()
 	defer ch.Unlock()
 

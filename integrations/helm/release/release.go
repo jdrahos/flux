@@ -1,6 +1,7 @@
 package release
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -33,12 +34,14 @@ type Release struct {
 }
 
 type repo struct {
+	ConfigSync *helmgit.Checkout
 	ChartsSync *helmgit.Checkout
 }
 
 // New creates a new Release instance
-func New(logger log.Logger, helmClient *k8shelm.Client, chartsCheckout *helmgit.Checkout) *Release {
+func New(logger log.Logger, helmClient *k8shelm.Client, configCheckout *helmgit.Checkout, chartsCheckout *helmgit.Checkout) *Release {
 	repo := repo{
+		ConfigSync: configCheckout,
 		ChartsSync: chartsCheckout,
 	}
 	r := &Release{
@@ -133,7 +136,7 @@ func (r *Release) canDelete(name string) (bool, error) {
 
 // Install ... performs Chart release. Depending on the release type, this is either a new release,
 // or an upgrade of an existing one
-func (r *Release) Install(releaseName string, fhr ifv1.FluxHelmResource, releaseType ReleaseType, dryRun bool) (hapi_release.Release, error) {
+func (r *Release) Install(checkout *helmgit.Checkout, releaseName string, fhr ifv1.FluxHelmResource, releaseType ReleaseType, dryRun bool) (hapi_release.Release, error) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -150,13 +153,16 @@ func (r *Release) Install(releaseName string, fhr ifv1.FluxHelmResource, release
 		namespace = "default"
 	}
 
-	err := r.Repo.ChartsSync.Pull()
+	ctx, cancel := context.WithTimeout(context.Background(), helmgit.DefaultCloneTimeout)
+	err := checkout.Pull(ctx)
+	cancel()
 	if err != nil {
-		r.logger.Log("error", fmt.Sprintf("Failure to do git pull: %#v", err))
-		return hapi_release.Release{}, err
+		errm := fmt.Errorf("Failure to do git pull: %#v", err)
+		r.logger.Log("error", errm.Error())
+		return hapi_release.Release{}, errm
 	}
 
-	chartDir := filepath.Join(r.Repo.ChartsSync.Dir, chartPath)
+	chartDir := filepath.Join(checkout.Dir, chartPath)
 
 	rawVals, err := collectValues(fhr.Spec.Customizations)
 	if err != nil {
@@ -274,10 +280,4 @@ func collectValues(params []ifv1.HelmChartParam) ([]byte, error) {
 
 	fmt.Printf("Values string slice ... %#v\n\n", base)
 	return yaml.Marshal(base)
-}
-
-func (r *Release) tillerCheck(err error) {
-	//if _, ok := err.(context.deadlineExceededError; ok {
-
-	//}
 }

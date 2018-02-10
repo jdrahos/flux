@@ -151,7 +151,7 @@ func (chs *ChartChangeSync) newCommits() (bool, error) {
 
 	// get previous revision
 	if checkout.Dir == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), chs.Polling.Timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), helmgit.DefaultCloneTimeout)
 		err := checkout.Clone(ctx, helmgit.ChartsChangesClone)
 		cancel()
 		if err != nil {
@@ -162,7 +162,9 @@ func (chs *ChartChangeSync) newCommits() (bool, error) {
 	}
 
 	// pull
-	err := checkout.Pull()
+	ctx, cancel := context.WithTimeout(context.Background(), helmgit.DefaultsPullTimeout)
+	err := checkout.Pull(ctx)
+	cancel()
 	if err != nil {
 		errm := fmt.Errorf("Failure while pulling repo: %#v", err)
 		chs.logger.Log("error", errm.Error())
