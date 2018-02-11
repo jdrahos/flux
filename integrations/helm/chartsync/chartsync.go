@@ -24,6 +24,7 @@ import (
 	"github.com/go-kit/kit/log"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 
 	//"gopkg.in/src-d/go-git.v4/plumbing"
@@ -52,47 +53,68 @@ type ChartChangeSync struct {
 }
 
 //  Run ... create a syncing loop
-func (chs *ChartChangeSync) Run(stopCh <-chan struct{}) {
+func (chs *ChartChangeSync) Run(stopCh <-chan struct{}, errc chan error) {
+	chs.release.Repo.ChartsSync.Lock()
+	defer chs.release.Repo.ChartsSync.Unlock()
+	defer runtime.HandleCrash()
 
-	// every UpdateInterval check the git repo
-	// 		revision now
-	//		pull
-	//		revision after pull
+	go func() {
+		ticker := time.NewTicker(chs.Polling.Interval)
+		defer ticker.Stop()
+		defer chs.release.Repo.ChartsSync.Cleanup()
 
-	// input :
-	//		release, fhrinformer ?,
-	// check if repo cloned
-	// get the charts dir subdirs:
-	//		get all the subdirs
-	//			collect all gitchartpaths into a list ($chart subdir)
-	//			loop through the list:
-	//					are there commits
-	//						no changes => nothing to do
-	//						changes =>
-	//								find all fhrs with the relevant label
-	//								loop through them and release the chart
-	//
+		var exist bool
+		var err error
 
-	/*
-		pollTimer := time.NewTimer(chs.PollInterval)
-		pullThen := func(k func(logger log.Logger) error) {
-			defer func() {
-				pollTimer.Stop()
-				pollTimer = time.NewTimer(chs.PollInterval)
-			}()
-			ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
-			defer cancel()
-			if err := chs.release.Pull(ctx); err != nil {
-				logger.Log("operation", "pull", "err", err)
-				return
-			}
-			if err := k(logger); err != nil {
-				logger.Log("operation", "after-pull", "err", err)
+		for {
+			select {
+			case <-ticker.C:
+				// new commits?
+				if exist, err = chs.newCommits(); err != nil {
+					chs.logger.Log("error", fmt.Sprintf("Failure during retrieving commits: %#v", err))
+					continue
+				}
+				// continue if not
+				if !exist {
+					continue
+				}
+				// get namespaces
+				ns, err := GetNamespaces(chs.logger, chs.kubeClient)
+				if err != nil {
+					errc <- err
+				}
+				// get chart dirs
+				chartDirs, err := chs.getChartDirs()
+				if err != nil {
+					continue
+				}
+				// get fhrs
+				chartFhrs := make(map[string][]ifv1.FluxHelmResource)
+				for chart := range chartDirs {
+					err = chs.getCustomResources(ns, chart, chartFhrs)
+					if err != nil {
+						chs.logger.Log("error", fmt.Sprintf("Failure during retrieving Custom Resources related to Chart: %s", chart))
+						continue
+					}
+				}
+				if len(chartFhrs) < 1 {
+					continue
+				}
+				// compare manifests and release if required
+				if err = chs.releaseCharts(chartDirs, chartFhrs); err != nil {
+					chs.logger.Log("error", fmt.Sprintf("%#v", err))
+				}
+			case <-stopCh:
+				break
 			}
 		}
-	*/
+
+	}()
+
+	<-stopCh
 }
 
+// GetNamespaces ... gets current kubernetes cluster namespaces
 func GetNamespaces(logger log.Logger, kubeClient kubernetes.Clientset) ([]string, error) {
 	ns := []string{}
 
@@ -110,6 +132,7 @@ func GetNamespaces(logger log.Logger, kubeClient kubernetes.Clientset) ([]string
 	return ns, nil
 }
 
+// getChartDirs ... retrieves charts under the charts directory (under the repo root)
 func (chs *ChartChangeSync) getChartDirs() (map[string]string, error) {
 	chartD := make(map[string]string)
 
@@ -142,14 +165,15 @@ func (chs *ChartChangeSync) getChartDirs() (map[string]string, error) {
 	return chartD, nil
 }
 
-// newCommits ... determines which charts need to be released
+// newCommits ... determines if charts need to be released
+//		go-git.v4 does not provide a possibility to find commit for a particular path.
+// 		So we find if there are any commits at all sice last time
 func (chs *ChartChangeSync) newCommits() (bool, error) {
 	chs.Lock()
 	defer chs.Unlock()
 
 	checkout := chs.release.Repo.ChartsSync
 
-	// get previous revision
 	if checkout.Dir == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), helmgit.DefaultCloneTimeout)
 		err := checkout.Clone(ctx, helmgit.ChartsChangesClone)
@@ -161,8 +185,7 @@ func (chs *ChartChangeSync) newCommits() (bool, error) {
 		}
 	}
 
-	// pull
-	ctx, cancel := context.WithTimeout(context.Background(), helmgit.DefaultsPullTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), helmgit.DefaultPullTimeout)
 	err := checkout.Pull(ctx)
 	cancel()
 	if err != nil {
@@ -171,7 +194,9 @@ func (chs *ChartChangeSync) newCommits() (bool, error) {
 		return false, errm
 	}
 	// get latest revision
+	ctx, cancel = context.WithTimeout(context.Background(), helmgit.DefaultPullTimeout)
 	newRev, err := checkout.GetRevision()
+	cancel()
 	if err != nil {
 		errm := fmt.Errorf("Failure while getting repo revision: %#v", err)
 		chs.logger.Log("error", errm.Error())
@@ -211,7 +236,8 @@ func (chs *ChartChangeSync) newCommits() (bool, error) {
 	return false, nil
 }
 
-func (chs *ChartChangeSync) getCustomResources(namespaces []string, chart string, nsFhrs map[string][]ifv1.FluxHelmResource) error {
+// getCustomResources ... assembles custom resources referencing a particular chart
+func (chs *ChartChangeSync) getCustomResources(namespaces []string, chart string, chartFhrs map[string][]ifv1.FluxHelmResource) error {
 	fhrs := []ifv1.FluxHelmResource{}
 
 	chartSelector := map[string]string{
@@ -228,11 +254,11 @@ func (chs *ChartChangeSync) getCustomResources(namespaces []string, chart string
 		}
 
 		for _, fhr := range list.Items {
-			fmt.Printf("\n>>>  %v \n\n", fhr)
+			fmt.Printf("\t\t>>>  %v \n\n", fhr)
 			fhrs = append(fhrs, fhr)
 		}
 	}
-	nsFhrs[chart] = fhrs
+	chartFhrs[chart] = fhrs
 
 	return nil
 }

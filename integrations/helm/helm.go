@@ -31,7 +31,6 @@ func NewClient(kubeClient *kubernetes.Clientset, opts TillerOptions) (*k8shelm.C
 	if err != nil {
 		return &k8shelm.Client{}, err
 	}
-	fmt.Printf("Tiller host = %q\n", host)
 
 	return k8shelm.NewClient(k8shelm.Host(host)), nil
 }
@@ -44,7 +43,6 @@ func GetTillerVersion(cl k8shelm.Client, h string) (string, error) {
 	if v, err = cl.GetVersion(voption); err == nil {
 		return "", fmt.Errorf("error getting tiller version: %v", err)
 	}
-	fmt.Printf("Tiller version is: [%#v]\n", v.GetVersion())
 
 	return v.GetVersion().String(), nil
 }
@@ -64,8 +62,6 @@ func tillerHost(kubeClient *kubernetes.Clientset, opts TillerOptions) (string, e
 	var err error
 	var ip string
 	var port string
-
-	fmt.Printf("Tiller Options = : %#v\n", opts)
 
 	if opts.IP == "" {
 		ts, err = kubeClient.CoreV1().Services(opts.Namespace).Get("tiller-deploy", metav1.GetOptions{})

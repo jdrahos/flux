@@ -45,11 +45,10 @@ func New(logger log.Logger, helmClient *k8shelm.Client, configCheckout *helmgit.
 		ChartsSync: chartsCheckout,
 	}
 	r := &Release{
-		logger:     log.With(logger, "component", "release"),
+		logger:     logger,
 		HelmClient: helmClient,
 		Repo:       repo,
 	}
-
 	return r
 }
 
@@ -61,11 +60,9 @@ func GetReleaseName(fhr ifv1.FluxHelmResource) string {
 		namespace = "default"
 	}
 	releaseName := fhr.Spec.ReleaseName
-	fmt.Printf("---> release name from fhr.Spec.ReleaseName: %s\n", releaseName)
 	if releaseName == "" {
 		releaseName = fmt.Sprintf("%s-%s", namespace, fhr.Name)
 	}
-	fmt.Printf("---> final release name: %s\n", releaseName)
 
 	return releaseName
 }
@@ -77,7 +74,7 @@ func GetReleaseName(fhr ifv1.FluxHelmResource) string {
 func (r *Release) Exists(name string) (bool, error) {
 	rls, err := r.HelmClient.ReleaseContent(name)
 	if err != nil {
-		r.logger.Log("info", fmt.Sprintf("Getting release (%s): %v", name, err))
+		//r.logger.Log("debug", fmt.Sprintf("Getting release (%s): %v", name, err))
 		return false, err
 	}
 	/*
@@ -92,10 +89,9 @@ func (r *Release) Exists(name string) (bool, error) {
 		"PENDING_ROLLBACK": 8,
 	*/
 	rst := rls.Release.Info.Status.GetCode()
-	r.logger.Log("info", fmt.Sprintf("Release [%s] status: %#v", name, rst.String()))
+	r.logger.Log("info", fmt.Sprintf("Found release [%s] with status %s", name, rst.String()))
 
 	if rst == 1 || rst == 4 {
-		r.logger.Log("info", fmt.Sprintf("Release [%s] status: %#v", name, rst.String()))
 		return true, nil
 	}
 	return true, fmt.Errorf("Release [%s] exists with status: %s", name, rst.String())
@@ -103,9 +99,8 @@ func (r *Release) Exists(name string) (bool, error) {
 
 func (r *Release) canDelete(name string) (bool, error) {
 	rls, err := r.HelmClient.ReleaseStatus(name)
-	r.logger.Log("info", fmt.Sprintf("+++  2 release status = %#v", rls))
 	if err != nil {
-		r.logger.Log("error", fmt.Sprintf("Error finding status for release (%s): %v", name, err))
+		r.logger.Log("error", fmt.Sprintf("Error finding status for release (%s): %#v", name, err))
 		return false, err
 	}
 	/*
@@ -120,7 +115,7 @@ func (r *Release) canDelete(name string) (bool, error) {
 		"PENDING_ROLLBACK": 8,
 	*/
 	status := rls.GetInfo().GetStatus()
-	r.logger.Log("info", fmt.Sprintf("Release [%s] status: %#v", name, status.Code.String()))
+	r.logger.Log("info", fmt.Sprintf("Release [%s] status: %s", name, status.Code.String()))
 	switch status.Code {
 	case 1, 4:
 		r.logger.Log("info", fmt.Sprintf("Deleting release (%s)", name))
@@ -232,12 +227,7 @@ func (r *Release) Delete(name string) error {
 		return nil
 	}
 
-	res, err := r.HelmClient.DeleteRelease(name)
-	fmt.Sprintf("===> res: %#v\n\n", res)
-	if res != nil {
-		fmt.Sprintf("===> res.GetRelease: %#v\n\n", res.GetRelease())
-	}
-
+	_, err = r.HelmClient.DeleteRelease(name)
 	if err != nil {
 		r.logger.Log("error", fmt.Sprintf("Release deletion error: %#v", err))
 		return err
@@ -278,6 +268,5 @@ func collectValues(params []ifv1.HelmChartParam) ([]byte, error) {
 		base[k] = v
 	}
 
-	fmt.Printf("Values string slice ... %#v\n\n", base)
 	return yaml.Marshal(base)
 }
