@@ -1,5 +1,5 @@
 /*
-Copyright 2018 Weaveworks Ltd.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=integrations.flux, Version=v1
+	// Group=Integrations, Version=V1
 	case v1.SchemeGroupVersion.WithResource("fluxhelmresources"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Integrations().V1().FluxHelmResources().Informer()}, nil
 

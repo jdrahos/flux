@@ -1,5 +1,5 @@
 /*
-Copyright 2018 Weaveworks Ltd.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package versioned
 
 import (
 	glog "github.com/golang/glog"
-	integrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations.flux/v1"
+	integrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations/v1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
