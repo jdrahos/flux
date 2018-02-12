@@ -47,6 +47,7 @@
           # replace (at least) the following URL
           - --git-url=git@github.com:weaveworks/helm-fhr-test
           - --git-branch=master
+          - --git-config-path=config
           - --git-charts-path=charts
           # include these next two to connect to an "upstream" service
           # (e.g., Weave Cloud). The token is particular to the service.

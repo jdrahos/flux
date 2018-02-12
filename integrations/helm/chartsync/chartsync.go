@@ -268,7 +268,37 @@ func (chs *ChartChangeSync) getCustomResources(namespaces []string, chart string
 //					chartD ... provides chart name and its directory information
 //					fhr ...... provides chart name and all Custom Resources associated with this chart
 //		does a dry run and compares the manifests (and value file?) If differences => release)
-func (chs *ChartChangeSync) releaseCharts(chartD map[string]string, fhr map[string][]ifv1.FluxHelmResource) error {
+func (chs *ChartChangeSync) releaseCharts(chartDirs map[string]string, chartFhrs map[string][]ifv1.FluxHelmResource) error {
+	helmCl := chs.release.HelmClient
+	checkout := chs.release.Repo.ChartsSync
+	for chart, _ := range chartDirs {
+		fhrs := chartFhrs[chart]
+		for _, fhr := range fhrs {
+			rlsName := chartrelease.GetReleaseName(fhr)
+			// get current release
+			currRlsRes, err := helmCl.ReleaseContent(rlsName)
+			if err != nil {
+				continue
+			}
+			// get dry-run of a new release
+			newRls, err := chs.release.Install(checkout, rlsName, fhr, "UPDATE", true)
+			if err != nil {
+				continue
+			}
+			// compare manifests => release if different
+			currMnf := currRlsRes.Release.GetManifest()
+			newMnf := newRls.GetManifest()
+
+			if currMnf == newMnf {
+				continue
+			}
+			_, err = chs.release.Install(checkout, rlsName, fhr, "UPDATE", false)
+			if err != nil {
+				continue
+			}
+			chs.logger.Log("info", fmt.Sprintf("Release [%s] upgraded due to chart only changes", rlsName))
+		}
+	}
 
 	return nil
 }
