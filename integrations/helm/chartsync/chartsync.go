@@ -278,11 +278,13 @@ func (chs *ChartChangeSync) releaseCharts(chartDirs map[string]string, chartFhrs
 			// get current release
 			currRlsRes, err := helmCl.ReleaseContent(rlsName)
 			if err != nil {
+				chs.logger.Log("info", fmt.Sprintf("Getting release [%s] for upgrade due to charts changes: %s. Skipping.", rlsName, err.Error()))
 				continue
 			}
 			// get dry-run of a new release
 			newRls, err := chs.release.Install(checkout, rlsName, fhr, "UPDATE", true)
 			if err != nil {
+				chs.logger.Log("info", fmt.Sprintf("Error during dry run upgrade of release of [%s]: %s. Skipping.", rlsName, err.Error()))
 				continue
 			}
 			// compare manifests => release if different
@@ -294,11 +296,14 @@ func (chs *ChartChangeSync) releaseCharts(chartDirs map[string]string, chartFhrs
 			}
 			_, err = chs.release.Install(checkout, rlsName, fhr, "UPDATE", false)
 			if err != nil {
+				chs.logger.Log("info", fmt.Sprintf("Error during dry run upgrade of release of [%s]: %s. Skipping.", rlsName, err.Error()))
+				// TODO: collect errors and return them after looping through all - ?
 				continue
 			}
 			chs.logger.Log("info", fmt.Sprintf("Release [%s] upgraded due to chart only changes", rlsName))
 		}
 	}
+	//NEXT:
 
 	return nil
 }
