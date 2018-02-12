@@ -31,8 +31,8 @@ import (
 
 	ifv1 "github.com/weaveworks/flux/apis/integrations.flux/v1"
 	ifclientset "github.com/weaveworks/flux/integrations/client/clientset/versioned"
-	//iflister "github.com/weaveworks/flux/integrations/client/listers/integrations.flux/v1"	// kubernetes 1.9
-	iflister "github.com/weaveworks/flux/integrations/client/listers/integrations/v1" // kubernetes 1.8
+	iflister "github.com/weaveworks/flux/integrations/client/listers/integrations.flux/v1" // kubernetes 1.9
+	//iflister "github.com/weaveworks/flux/integrations/client/listers/integrations/v1" // kubernetes 1.8
 	helmgit "github.com/weaveworks/flux/integrations/helm/git"
 	chartrelease "github.com/weaveworks/flux/integrations/helm/release"
 )

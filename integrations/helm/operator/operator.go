@@ -3,6 +3,7 @@ package operator
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -24,8 +25,8 @@ import (
 	clientset "github.com/weaveworks/flux/integrations/client/clientset/versioned"
 	ifscheme "github.com/weaveworks/flux/integrations/client/clientset/versioned/scheme"
 	ifinformers "github.com/weaveworks/flux/integrations/client/informers/externalversions"
-	//iflister "github.com/weaveworks/flux/integrations/client/listers/integrations.flux/v1"   // kubernetes 1.9
-	iflister "github.com/weaveworks/flux/integrations/client/listers/integrations/v1" // kubernetes 1.8
+	iflister "github.com/weaveworks/flux/integrations/client/listers/integrations.flux/v1" // kubernetes 1.9
+	//iflister "github.com/weaveworks/flux/integrations/client/listers/integrations/v1" // kubernetes 1.8
 	chartrelease "github.com/weaveworks/flux/integrations/helm/release"
 )
 
@@ -133,9 +134,10 @@ func New(
 // as syncing informer caches and starting workers. It will block until stopCh
 // is closed, at which point it will shutdown the workqueue and wait for
 // workers to finish processing their current work items.
-func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
+func (c *Controller) Run(threadiness int, stopCh <-chan struct{}, wg *sync.WaitGroup) error {
 	defer runtime.HandleCrash()
 	defer c.releaseWorkqueue.ShutDown()
+	defer wg.Done()
 
 	c.logger.Log("info", "Starting operator")
 	// Wait for the caches to be synced before starting workers

@@ -18,8 +18,8 @@ package fake
 
 import (
 	clientset "github.com/weaveworks/flux/integrations/client/clientset/versioned"
-	integrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations/v1"
-	fakeintegrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations/v1/fake"
+	integrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations.flux/v1"
+	fakeintegrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations.flux/v1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"

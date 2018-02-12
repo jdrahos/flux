@@ -18,7 +18,7 @@ package versioned
 
 import (
 	glog "github.com/golang/glog"
-	integrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations/v1"
+	integrationsv1 "github.com/weaveworks/flux/integrations/client/clientset/versioned/typed/integrations.flux/v1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"

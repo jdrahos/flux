@@ -84,6 +84,7 @@ func NewCheckout(logger log.Logger, config GitRemoteConfig, auth *gitssh.PublicK
 //																		* acting on Charts changes (syncing the cluster when there were only commits
 //																		  in the Charts parts of the repo which did not trigger Custom Resource changes)
 func (ch *Checkout) Clone(ctx context.Context, cloneSubdir string) error {
+	fmt.Println("*** cloning")
 	ch.Lock()
 	defer ch.Unlock()
 
@@ -133,6 +134,7 @@ func (ch *Checkout) Clone(ctx context.Context, cloneSubdir string) error {
 
 // Cleanup ... removes the temp repo directory
 func (ch *Checkout) Cleanup() {
+	fmt.Println("*** cleanup")
 	ch.Lock()
 	defer ch.Unlock()
 
@@ -178,6 +180,7 @@ func GetRepoAuth(k8sSecretVolumeMountPath, k8sSecretDataKey string) (*gitssh.Pub
 
 // Pull ... makes a git pull
 func (ch *Checkout) Pull(ctx context.Context) error {
+	fmt.Println("*** pulling")
 	ch.Lock()
 	defer ch.Unlock()
 

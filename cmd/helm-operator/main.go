@@ -265,7 +265,8 @@ func main() {
 	// Starts handling k8s events related to the given resource kind
 	go ifInformerFactory.Start(shutdown)
 
-	if err = opr.Run(*queueWorkerCount, shutdown); err != nil {
+	shutdownWg.Add(1)
+	if err = opr.Run(*queueWorkerCount, shutdown, shutdownWg); err != nil {
 		msg := fmt.Sprintf("Failure to run controller: %s", err.Error())
 		logger.Log("error", msg)
 		errc <- fmt.Errorf(ErrOperatorFailure, err)
