@@ -53,10 +53,6 @@ const (
 // Controller is the operator implementation for FluxHelmResource resources
 type Controller struct {
 	logger log.Logger
-	// 		kubeclientset is a standard kubernetes clientset
-	// kubeclientset kubernetes.Interface
-	// 		fhrclientset is a clientset for our own API group
-	// fhrclientset clientset.Interface
 
 	fhrLister iflister.FluxHelmResourceLister
 	fhrSynced cache.InformerSynced

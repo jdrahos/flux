@@ -48,7 +48,7 @@ var (
 	customKubectl *string
 	gitURL        *string
 	gitBranch     *string
-	gitConfigPath *string
+	//gitConfigPath *string
 	gitChartsPath *string
 
 	k8sSecretName            *string
@@ -97,7 +97,7 @@ func init() {
 	customKubectl = fs.String("kubernetes-kubectl", "", "Optional, explicit path to kubectl tool")
 	gitURL = fs.String("git-url", "", "URL of git repo with Kubernetes manifests; e.g., git@github.com:weaveworks/flux-example")
 	gitBranch = fs.String("git-branch", "master", "branch of git repo to use for Kubernetes manifests")
-	gitConfigPath = fs.String("git-config-path", defaultGitConfigPath, "path within git repo to locate Custom Resource Kubernetes manifests (relative path)")
+	//gitConfigPath = fs.String("git-config-path", defaultGitConfigPath, "path within git repo to locate Custom Resource Kubernetes manifests (relative path)")
 	gitChartsPath = fs.String("git-charts-path", defaultGitChartsPath, "path within git repo to locate Helm Charts (relative path)")
 
 	// k8s-secret backed ssh keyring configuration
@@ -148,12 +148,11 @@ func main() {
 	// ----------------------------------------------------------------------
 
 	mainLogger := log.With(logger, "component", "helm-operator")
-	mainLogger.Log("info", "!!! I am functional! !!!")
 
 	// GIT REPO CONFIG ----------------------------------------------------------------------
 	mainLogger.Log("info", "\t*** Setting up git repo configs")
 
-	gitRemoteConfigFhr, err := git.NewGitRemoteConfig(*gitURL, *gitBranch, *gitConfigPath)
+	gitRemoteConfigFhr, err := git.NewGitRemoteConfig(*gitURL, *gitBranch, *gitChartsPath)
 	if err != nil {
 		mainLogger.Log("err", err)
 		os.Exit(1)
