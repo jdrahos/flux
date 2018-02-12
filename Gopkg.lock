@@ -482,15 +482,14 @@
   version = "v6.0.0"
 
 [[projects]]
-  branch = "release-1.9"
   name = "k8s.io/code-generator"
   packages = ["cmd/client-gen","cmd/client-gen/args","cmd/client-gen/generators","cmd/client-gen/generators/fake","cmd/client-gen/generators/scheme","cmd/client-gen/generators/util","cmd/client-gen/path","cmd/client-gen/types"]
-  revision = "91d3f6a57905178524105a085085901bb73bd3dc"
+  revision = "306be794f1b124a9c939ab168e9ea3944387e66b"
 
 [[projects]]
   name = "k8s.io/gengo"
   packages = ["args","generator","namer","parser","types"]
-  revision = "b58fc7edb82e0c6ffc9b8aef61813c7261b785d4"
+  revision = "9e661e9308f078838e266cca1c673922088c0ea4"
 
 [[projects]]
   name = "k8s.io/helm"
@@ -507,6 +506,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "d0b76100801ee767f27d8a5dd271eca4bab8ce40e131cd1569fc6ce332cac9e6"
+  inputs-digest = "a84688b3ca998a7190b808fe966365f00e10f964ecede36893319e9c93cf1150"
   solver-name = "gps-cdcl"
   solver-version = 1

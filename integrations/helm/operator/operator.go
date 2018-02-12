@@ -24,7 +24,8 @@ import (
 	clientset "github.com/weaveworks/flux/integrations/client/clientset/versioned"
 	ifscheme "github.com/weaveworks/flux/integrations/client/clientset/versioned/scheme"
 	ifinformers "github.com/weaveworks/flux/integrations/client/informers/externalversions"
-	iflister "github.com/weaveworks/flux/integrations/client/listers/integrations.flux/v1"
+	//iflister "github.com/weaveworks/flux/integrations/client/listers/integrations.flux/v1"   // kubernetes 1.9
+	iflister "github.com/weaveworks/flux/integrations/client/listers/integrations/v1" // kubernetes 1.8
 	chartrelease "github.com/weaveworks/flux/integrations/helm/release"
 )
 
@@ -327,8 +328,8 @@ func (c *Controller) enqueueUpateJob(old, new interface{}) {
 	oldResVer := oldFhr.ResourceVersion
 	newResVer := newFhr.ResourceVersion
 	if newResVer != oldResVer {
-		//fmt.Printf("*** old resource version ... %#v\n", oldResVer)
-		//fmt.Printf("*** new resource version ... %#v\n", newResVer)
+		fmt.Printf("*** old resource version ... %#v\n", oldResVer)
+		fmt.Printf("*** new resource version ... %#v\n", newResVer)
 		c.logger.Log("info", "UPDATING release")
 		c.enqueueJob(new)
 	}

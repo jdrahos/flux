@@ -14,18 +14,18 @@ required = ["k8s.io/code-generator/cmd/client-gen"]
 
 [[constraint]]
   name = "k8s.io/code-generator"
-  branch = "release-1.9"
+  revision = "306be794f1b124a9c939ab168e9ea3944387e66b"
 
 # goland/dep does not follow k8s.io/code-generator's Godeps.json and gengo's master
 # version does not work with release-1.8 k8s.io/code-generator. So we have to
 # override it.
 [[override]]
   name = "k8s.io/gengo"
-  revision = "b58fc7edb82e0c6ffc9b8aef61813c7261b785d4"
+  revision = "9e661e9308f078838e266cca1c673922088c0ea4"
 
 [[constraint]]
   name = "k8s.io/helm"
-  version = "v2.8.0"
+  version = "v2.7.2"
 
 [[constraint]]
   name = "google.golang.org/grpc"
